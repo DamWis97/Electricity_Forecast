@@ -78,7 +78,9 @@ west_price %>%
   ACF(price) %>%
   autoplot()
 ```
+
 We can see a somewhat decreasing trend in the price level, as well as spikes around winter months. We can also see from subseries plot that prices for Saturday and Sundays tend to be little bit lower than other weekdays. We can also note on ACF plot that correlation between lags gets lower and lower. This can indicate that an ARIMA model can be good for our forcasting. 
+
 
 ## Decomposition analysis
 
