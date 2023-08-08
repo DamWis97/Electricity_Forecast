@@ -1,0 +1,122 @@
+---
+title: "Electricity Forecast"
+author: "Damian Wisniewski"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Electricity Price Analysis and Forecast
+
+In this workshop we want to build a model that will forecast monthly average price
+for August 2023 (For Western Norway). This will make it possible for us to give an estimate of the Governmental support scheme. We will use July 2023 as the test month to pick and compare different models. Later we will use our model to forecast August 2023. 
+```{r include = FALSE, echo = FALSE}
+# Libraries
+library(fpp3)
+library(tidyverse)
+
+# Clean enviroment
+rm(list=ls())
+
+# ggplot theme:
+theme_set(
+  theme_classic() + 
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank())
+)
+```
+
+# Data
+```{r}
+# Using Martin Jummu's github repository to get the data
+elprices <- readr::read_csv(
+  "https://raw.githubusercontent.com/martinju/stromstotte/master/data/database_nordpool_daily.csv")
+```
+Data is updated on daily basis and contains following columns: 
+  - area: Price regions (NO1, NO2, ..., NO5)
+  - date
+  - price: Daily average price in NOK per kWh
+
+Data preperation
+```{r message=FALSE, warning=FALSE}
+# Filter out prices for Western Norway
+west_price <- elprices |> 
+  filter(area == 'NO5') |>  # NO5 is area representing Western Norway
+  select(-area) |> # No need for area for our analysis
+  as_tsibble(index = date) # Change object to a tsibble to make forecasting possible
+
+# Create our test set - July 2023
+july23 <- west_price |> 
+  filter(yearmonth(date) == yearmonth("Jul 2023"))
+
+# Create our forecasting set - August 2023
+august23 <- west_price |> 
+  filter(yearmonth(date) == yearmonth("Aug 2023"))
+
+# Create our training set from months before July 2023
+west_price <- west_price |> 
+  filter(yearmonth(date) < yearmonth("Jul 2023"))
+```
+
+
+## Exploratory Analysis
+```{r}
+# Plot of price
+west_price |> 
+  autoplot(price)
+```
+```{r}
+# 
+west_price |> 
+  gg_subseries(price, period = "week")
+```
+```{r}
+west_price %>%  
+  ACF(price) %>%
+  autoplot()
+```
+We can see a somewhat decreasing trend in the price level, as well as spikes around winter months. We can also see from subseries plot that prices for Saturday and Sundays tend to be little bit lower than other weekdays. We can also note on ACF plot that correlation between lags gets lower and lower. This can indicate that an ARIMA model can be good for our forcasting. 
+
+## Decomposition analysis
+
+With daily observations, the methods used by official statistical agencies are not relevant as they only allow for monthly or quarterly data. Therefore in this workshop we will use STL method.
+```{r}
+west_price |> 
+  model(stl = STL(price ~ season(period = "week")),
+        stl_periodic = STL(price ~ season(period = "week", window = "periodic"))) |>  
+  components() |> 
+  autoplot() +
+  theme(legend.position = "bottom") +
+  labs(title = "STL decomposition with default values vs periodic season")
+```
+```{r}
+
+```
+```{r}
+
+```
+```{r}
+
+```
+```{r}
+
+```
+```{r}
+
+```
+```{r}
+
+```
+```{r}
+
+```
+```{r}
+
+```
+```{r}
+
+```
+
