@@ -12,11 +12,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Electricity Price Analysis and Forecast
 
 In this workshop we want to build a model that will forecast monthly average price
-for August 2023 (For Western Norway). This will make it possible for us to give an estimate of the Governmental support scheme. We will use July 2023 as the test month to pick and compare different models. Later we will use our model to forecast August 2023.  
+for February 2023 (For Western Norway). This will make it possible for us to give an estimate of the Governmental support scheme. We will use February 2023 as the test month to pick and compare different models. Later we will use our model to forecast February 2023.  
 ```{r include = FALSE, echo = FALSE}
 # Libraries
 library(fpp3)
 library(tidyverse)
+library(latex2exp)
 
 # Clean enviroment
 rm(list=ls())
@@ -43,82 +44,233 @@ Data is updated on daily basis and contains following columns:
 Data preperation
 ```{r message=FALSE, warning=FALSE}
 # Filter out prices for Western Norway
-west_price <- elprices |> 
-  filter(area == 'NO5') |>  # NO5 is area representing Western Norway
-  select(-area) |> # No need for area for our analysis
-  as_tsibble(index = date) # Change object to a tsibble to make forecasting possible
+westprices <- elprices |>   
+  filter(area == "NO5") |>  
+  select(-area) |>  
+  as_tsibble(index = date)
 
-# Create our test set - July 2023
-july23 <- west_price |> 
-  filter(yearmonth(date) == yearmonth("Jul 2023"))
+# Create a January test set
+test <- westprices %>% 
+  filter(yearmonth(date) == yearmonth("Jan 2023"))
 
-# Create our forecasting set - August 2023
-august23 <- west_price |> 
-  filter(yearmonth(date) == yearmonth("Aug 2023"))
+# Create our February forecasting set
+feb23 <- westprices %>% 
+  filter(yearmonth(date) == yearmonth("Feb 2023"))
 
-# Create our training set from months before July 2023
-west_price <- west_price |> 
-  filter(yearmonth(date) < yearmonth("Jul 2023"))
+# Filter out prices before year 2023
+westprices <- westprices %>% 
+  filter(year(date) < 2023)
 ```
 
 
 ## Exploratory Analysis
 ```{r}
 # Plot of price
-west_price |> 
+westprices|> 
   autoplot(price)
 ```
 ```{r}
 # 
-west_price |> 
+westprices |> 
   gg_subseries(price, period = "week")
 ```
 ```{r}
-west_price %>%  
-  ACF(price) %>%
+westprices |>   
+  ACF(price) |> 
   autoplot()
 ```
 
-We can see a somewhat decreasing trend in the price level, as well as spikes around winter months. We can also see from subseries plot that prices for Saturday and Sundays tend to be little bit lower than other weekdays. We can also note on ACF plot that correlation between lags gets lower and lower. This can indicate that an ARIMA model can be good for our forcasting. 
+It is hard to detect any seasonal patterns from the time plot, but we can clearly see some cyclic behavoir in the price. We can however see that the average price is a bit lower on Staturday and Sunday in the seasonal subseries plot. We also see that the different days follow eachother over time in this plot. The ACF plot shows a slowly declining autocorrelation with very high correlation for the first lag. From this we can already see that maybe a ARIMA type model would be well suited for modelling this behavoir, because it seems that price on the days before is more important than the average price of a Sunday for instance.
 
 
 ## Decomposition analysis
 
 With daily observations, the methods used by official statistical agencies are not relevant as they only allow for monthly or quarterly data. Therefore in this workshop we will use STL method.
 ```{r}
-west_price |> 
-  model(stl = STL(price ~ season(period = "week")),
-        stl_periodic = STL(price ~ season(period = "week", window = "periodic"))) |>  
+westprices |>  
+  model(stl = STL(price ~season(period = "week")),
+        stl_periodic = STL(price ~season(period = "week", window = "periodic"))) |> 
   components() |> 
   autoplot() +
   theme(legend.position = "bottom") +
   labs(title = "STL decomposition with default values vs periodic season")
 ```
-```{r}
 
-```
-```{r}
+# Modelling using ARIMA
 
-```
-```{r}
+In this section we want to tranform price variable to a stationary one that we can use for forcasting. We can do that using different methods; which we will do here and then later choose the most optimal one for forcasting.
 
-```
-```{r}
+One tranformation that comes to mind is Box Cox transformation. First we have to estimate optimal $\hat{\lambda$ parameter, which we can do using the Guerero method. This lambda value we can use to tranform our price variable. 
 
-```
 ```{r}
+# Estimate lambda
+lambda <- westprices |> 
+  features(price, guerrero) |> 
+  pull(lambda_guerrero)
 
-```
-```{r}
-
-```
-```{r}
-
-```
-```{r}
-
-```
-```{r}
-
+cat("lambda = ", lambda)
 ```
 
+Another transformation we can try are log and log(price + 1). Last one will allow for negative values of price, which can happen in case there is a surplus of electricity in the market.
+
+Here we compare our transformations:
+```{r}
+# Plot of our transformations
+westprices |> 
+  mutate("Box-Cox transform" = box_cox(price, lambda),
+         "Log transform"     = log(price),
+         "Log+1 transform"   = log(1 + price)) |> 
+  select(-price) |> 
+  pivot_longer(-date)  |>  
+  ggplot(aes(x=date, y = value)) +
+  geom_line(aes(color = name)) +
+  theme(legend.position = "top",
+        legend.title = element_blank())
+```
+
+We can see that log(price + 1) seems like the most stable transformation and is potentially stationary such that we can use it for forecasting. We will therefore stick with this one for the rest of the project. 
+
+We will now check if this transformation is actually stationary. 
+```{r}
+# Check for how many differences are needed for series to be stationary
+westprices |> 
+  features(log(1 + price), unitroot_ndiffs)
+```
+```{r}
+# and how many seasonal differences
+westprices |> 
+  features(log(1 + price), unitroot_nsdiffs)
+```
+
+We can see that we do not need seasonal differences, but we do need to do one first difference. We can double check if series is then stationary with tsdisplay plot:
+```{r}
+# Check if differenced series is stationary
+westprices |> 
+  gg_tsdisplay(difference(log(1 + price)), plot_type = "partial")
+```
+In the ACF plot above we have significant correlations at lag 2 and 3, which may suggest a AR(3) for the differenced series, i.e. ARIMA(3,1,0). The PACF also have sigificant correlations at lag 2 and 3, which may suggest MA(3) for the differenced series, i.e. ARIMA(0,1,3). We fit these two suggestions with the three automatic ones. I am also doing a full search for our specified models to look for seasonal terms.
+```{r}
+# Fitting our models
+fits <- westprices |>  
+  model(
+    ar   = ARIMA(log(1 + price) ~ pdq(3,1,0), stepwise = FALSE, approx = FALSE),
+    ma   = ARIMA(log(1 + price) ~ pdq(0,1,3), stepwise = FALSE, approx = FALSE),
+    stepwise = ARIMA(log(1 + price)),
+    search = ARIMA(log(1 + price), stepwise = FALSE),
+    auto   = ARIMA(log(1 + price), stepwise = FALSE, approx = FALSE)
+  )
+
+# Printing out model specifications
+fits |>  pivot_longer(everything())
+```
+
+We can see that ARIMA function has suggested including a seasonal AR term at lag 7 in our suggested AR and MA models. Furthermore we can see that the automated full grid search model agrees with our MA model.
+
+Let's check how our models performed in terms of AICc
+```{r}
+fits |> 
+  glance() |> 
+  arrange(AICc) |> 
+  select(.model:BIC)
+```
+
+Since the ma and auto options ended up with the same model, the AICc values will of course also be the same and it turns out this is the best model by AIC, AICc and BIC.
+
+Let's filter out our best model
+```{r}
+fit <- fits |> 
+  select(auto)
+```
+
+Let's do some diagnostic of our model and it's residuals to check forecasting assumptions. 
+
+```{r}
+fit |> 
+  gg_tsresiduals()
+```
+
+
+
+```{r}
+fit |> 
+  augment() |> 
+  features(.innov, ljung_box, dof = 4, lag = 14)
+```
+
+Even if the ACF of the residuals only shows significant spike at lag 12 from white noise, Ljung Box test shows that we cannot reject the null hypothesis about uncorrelated variables (with p value = 0.4). Note that dof is 4, because we have 3 MA-paramters and 1 seasonal AR parameter, which totals to 4. I included lags up to 14 to also have the one significant lag included in the test. The histogram seems bell shaped, but quite heavy tailed. I also included a qq-plot where we clearly see heavy tailed behavior in both tails. Normality is not assumed. We require uncorrelated residuals, but normal distribution is just nice to have. 
+
+# Forecasting average monthly price
+
+We will now set up a Monte Carlo simulation for forecasting the average monthly electricity price for February We simulate daily February prices. We generate 500 forecasts of length 28 days. Then calculate the monthly average for all 500 simulations, giving us a sample of monthly averages that we calculate mean, standard devation and lower and upper 2.5% and 97.5% percentiles for.
+```{r}
+
+westprices_jan <- bind_rows(westprices, test)  
+
+fit <- westprices_jan |>  
+  model(arima = ARIMA(log(1 + price) ~ pdq(0,1,3) + PDQ(1,0,0))) 
+
+# Simulate: 
+sims <- fit |> 
+  generate(h = 28, times = 500)
+
+sims %>% 
+  index_by(month = ~ yearmonth(.)) |> 
+  group_by(.rep) |>   
+  # Calculate monthly average price for the simulations
+  summarize(average = mean(.sim)) |>  
+  ungroup() |>  
+  # Monte Carlo estimates: 
+  summarize(
+    mean = mean(average),
+    sd   = sd(average),
+    lwr  = quantile(average, prob = 0.025),
+    upr  = quantile(average, prob = 0.975)
+  )
+```
+
+In this final simulation we will start from Jan 31st of 2023 with the mean, standard deviation and 95% prediction interval from values above. Then we update our model with new daily observations. Continue adding days and updating the forecast until all days of February are observed.
+
+```{r}
+train <- bind_rows(westprices_jan, feb23) |> 
+  stretch_tsibble(.init = nrow(westprices_jan), .step = 1)
+
+avg.price <- tibble()
+
+for(i in 1:29){
+  ssum <- train |>   
+    filter(.id == i, yearmonth(date)==yearmonth("Feb 2023")) |> 
+    pull(price) |>  
+    sum()
+  if(i < 29){
+     fit <- train |> filter(.id == i) |> 
+       model(arima = ARIMA(log(1 + price) ~ pdq(0,1,3) + PDQ(1,0,0)))
+     sims <-  fit |> generate(h = 29-i, times = 500) |>  
+      as_tibble() |> 
+      group_by(.rep) |>  
+      summarize(avg = (sum(.sim) + ssum) / 28) |>  
+      ungroup() |> 
+      summarize(
+          mean = mean(avg),
+          sd   = sd(avg),
+          lwr  = quantile(avg, prob = 0.025),
+          upr  = quantile(avg, prob = 0.975)
+      )
+  } else {
+    sims = tibble(mean = ssum/28, sd = NA, lwr = ssum/28, upr = ssum/28)
+  }
+  avg.price <- bind_rows(avg.price, sims)
+}
+
+# Plot
+avg.price |>  
+  mutate(date = seq(date("2023-01-31"), date("2023-02-28"), by = 1)) %>% 
+  ggplot(aes(x= date, y = mean, ymin= lwr, ymax = upr))+ 
+  geom_line(color = "darkblue") + 
+  geom_ribbon(alpha = 0.2, fill = "blue") +
+  scale_x_date(date_breaks = "3 days", date_labels = "%b %d")+
+  scale_y_continuous(limits = c(0,4), expand = c(0,0))+
+  geom_hline(yintercept = mean(feb23$price), lty = 2, col = 2)+
+  labs(y = "Monthly average electricity price for February", 
+       x = "Time of last observation used in forecast")
+```
+The interpretation of the figure is that at the beginning of the month, we have little information and therefore quite large uncertainty: All the daily prices going into the monthly average have to be forecasted. But as time goes more and more of the daily prices are observed and fewer have to be forecasted. At say 25th of February we have observed 25 of the daily prices and only the remaining 3 are uncertain. Therefore the uncertainty is low. And at the 28th of February all daily prices are observed, and we know the monthly average price without uncertainty.
