@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Electricity Price Analysis and Forecast
 
 In this workshop we want to build a model that will forecast monthly average price
-for August 2023 (For Western Norway). This will make it possible for us to give an estimate of the Governmental support scheme. We will use July 2023 as the test month to pick and compare different models. Later we will use our model to forecast August 2023. 
+for August 2023 (For Western Norway). This will make it possible for us to give an estimate of the Governmental support scheme. We will use July 2023 as the test month to pick and compare different models. Later we will use our model to forecast August 2023.  
 ```{r include = FALSE, echo = FALSE}
 # Libraries
 library(fpp3)
